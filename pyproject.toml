@@ -1,0 +1,19 @@
+[project]
+name = "mcp-code"
+version = "0.1.0"
+description = "tạo mcp server trong máy để kết nối với AI web"
+readme = "README.md"
+authors = [
+    { name = "itgiup", email = "itgiup.com@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "mcp[cli]<2",
+]
+
+[project.scripts]
+mcp-code = "mcp_code:main"
+
+[build-system]
+requires = ["uv_build>=0.13.1,<0.14.0"]
+build-backend = "uv_build"
