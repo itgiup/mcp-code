@@ -53,6 +53,31 @@ def search_code(query: str, path: str = ".", max_results: int = 50) -> list[str]
             pass
     return out
 
+WRITE_BLOCKED_DIRS = {".git", ".ssh", ".venv", "node_modules", "__pycache__"}
+MAX_WRITE_BYTES = 500_000
+
+
+def safe_write(p: str) -> Path:
+    path = safe(p)
+    if WRITE_BLOCKED_DIRS & set(path.relative_to(ROOT).parts):
+        raise ValueError("Không được ghi vào thư mục này")
+    if path.name.startswith(".env"):
+        raise ValueError("Không được ghi file chứa khóa bí mật")
+    return path
+
+
+@mcp.tool()
+def write_file(path: str, content: str, overwrite: bool = False) -> str:
+    """Tạo file text mới (tự tạo thư mục cha). Ghi đè file có sẵn chỉ khi overwrite=True."""
+    if len(content.encode("utf-8")) > MAX_WRITE_BYTES:
+        raise ValueError("Nội dung quá lớn")
+    target = safe_write(path)
+    if target.exists() and not overwrite:
+        raise ValueError("File đã tồn tại, đặt overwrite=True để ghi đè")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+    return f"Đã ghi {target.relative_to(ROOT)}"
+
 
 def main() -> None:
     mcp.run(transport="stdio")
