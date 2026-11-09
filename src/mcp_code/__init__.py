@@ -1,5 +1,7 @@
 import os
 import sys
+import signal
+import subprocess
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -77,6 +79,53 @@ def write_file(path: str, content: str, overwrite: bool = False) -> str:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content, encoding="utf-8")
     return f"Đã ghi {target.relative_to(ROOT)}"
+
+CARGO_ALLOWED = {"check", "build", "test", "clippy", "fmt", "run"}
+CARGO_DENIED_ARGS = ("--config", "--manifest-path", "-Z", "--target-dir")
+MAX_OUTPUT = 20_000
+
+
+@mcp.tool()
+def cargo(
+    subcommand: str,
+    args: list[str] | None = None,
+    project: str = ".",
+    timeout_s: int = 120,
+) -> str:
+    """Chạy `cargo <subcommand>` trong project. Chỉ cho phép: check/build/test/clippy/fmt/run.
+    Hết timeout thì dừng cả nhóm tiến trình (gửi SIGTERM trước, rồi SIGKILL)."""
+    if subcommand not in CARGO_ALLOWED:
+        raise ValueError(f"Không cho phép: {subcommand}")
+    args = args or []
+    if any(a.startswith(CARGO_DENIED_ARGS) for a in args):
+        raise ValueError("Tham số bị chặn")
+    cwd = safe(project)
+    if not cwd.is_dir():
+        raise ValueError("project không phải thư mục")
+    timeout_s = max(1, min(timeout_s, 600))
+
+    env = dict(os.environ)
+    env["PATH"] = f"{Path.home()}/.cargo/bin:" + env.get("PATH", "")
+
+    proc = subprocess.Popen(
+        ["cargo", subcommand, *args],
+        cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, errors="replace",
+        start_new_session=True,  # để dừng được cả tiến trình con do `cargo run` sinh ra
+    )
+    try:
+        out, _ = proc.communicate(timeout=timeout_s)
+        status = f"exit={proc.returncode}"
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGTERM)  # kiểm tra luôn việc tắt êm của service
+        try:
+            out, _ = proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, signal.SIGKILL)
+            out, _ = proc.communicate()
+        status = f"hết giờ sau {timeout_s}s, đã dừng tiến trình"
+    return f"{status}\n{out[-MAX_OUTPUT:]}"
 
 
 def main() -> None:
